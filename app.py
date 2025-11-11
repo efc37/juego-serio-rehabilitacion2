@@ -118,7 +118,7 @@ with PoseLandmarker.create_from_options(options) as landmarker:
         # Mostrar tiempo restante de juego y puntos obtenidos
         cv2.putText(frame, f'Time: {config.game_time:.2f} - Points: {counter}', (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
         
-        config.game_time -= t
+        config.game_time -= t 
         
         if config.game_time <= 0:
             frame = np.zeros((int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)), int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), 3), dtype=np.uint8)

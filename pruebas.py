@@ -4,34 +4,54 @@ import random
 import time
 from config import config
 import sys
+import mediapipe as mp
+
 
 # Iniciar cámara
 cap = cv2.VideoCapture(0)
 cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
 cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
 
-# Colores que simulan frutas (BGR)
+# Mediapipe Pose
+mp_pose = mp.solutions.pose
+pose = mp_pose.Pose(
+    static_image_mode=False,
+    model_complexity=1,
+    enable_segmentation=False,
+    min_detection_confidence=0.5,
+    min_tracking_confidence=0.5
+)
+
 FRUIT_COLORS = [
-    (0, 0, 255),    # rojo
-    (0, 255, 255),  # amarillo
-    (0, 128, 0),    # verde
-    (255, 0, 255),  # magenta
-    (0, 165, 255),  # naranja
-    (255, 0, 0),    # azul
+    (0, 0, 255),
+    (0, 255, 255),
+    (0, 128, 0),
+    (255, 0, 255),
+    (0, 165, 255),
+    (255, 0, 0),
 ]
 
-# Variables de control
 sequence_generated = False
 current_sequence = []
 start_show_time = None
 
+waiting_for_user = False
+current_step = 0
+TAP_COOLDOWN = 0.5
+last_tap = 0
+
+correct_hits = []          # lista de ítems acertados
+disabled_indices = set()   # índices de círculos que ya no se pueden volver a tocar
+
+last_error = None
+last_error_time = 0
+
+
 def draw_fruit_count(frame, center, r, color, count):
-    """Dibuja 'count' bolitas de color dentro del círculo grande."""
     cx, cy = center
     mini_r = max(8, r // 6)
     offset = int(r * 0.5)
 
-    # Posiciones tipo 3x3 dentro del círculo
     positions = []
     for row in [-1, 0, 1]:
         for col in [-1, 0, 1]:
@@ -46,6 +66,13 @@ def draw_fruit_count(frame, center, r, color, count):
         cv2.circle(frame, (x, y), mini_r, color, -1)
         cv2.circle(frame, (x, y), mini_r, (0, 0, 0), 1)
 
+
+def draw_cross(frame, center, r):
+    x, y = center
+    cv2.line(frame, (x - r//3, y - r//3), (x + r//3, y + r//3), (0, 0, 255), 4)
+    cv2.line(frame, (x - r//3, y + r//3), (x + r//3, y - r//3), (0, 0, 255), 4)
+
+
 while True:
     ret, frame = cap.read()
     if not ret:
@@ -54,7 +81,9 @@ while True:
     frame = cv2.flip(frame, 1)
     h, w = frame.shape[:2]
 
-    # Parámetros de cuadrícula
+    rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    results = pose.process(rgb)
+
     r = int(min(w / 16, h / 9))
     x_margin = int(w * 0.18)
     y_margin = int(h * 0.20)
@@ -62,7 +91,6 @@ while True:
     y_positions = np.linspace(y_margin, h - y_margin, 3, dtype=int)
     centers = [(x, y) for y in y_positions for x in x_positions]
 
-    # Generar la secuencia solo una vez
     if not sequence_generated:
         chosen_indices = random.sample(range(len(centers)), 6)
         seq = []
@@ -74,7 +102,7 @@ while True:
         start_show_time = time.time()
         sequence_generated = True
 
-    # Dibujar líneas (hasta los bordes de los círculos)
+    # Dibujar líneas
     for y in y_positions:
         for i in range(len(x_positions) - 1):
             x1 = x_positions[i] + r
@@ -91,40 +119,70 @@ while True:
     for (cx, cy) in centers:
         cv2.circle(frame, (cx, cy), r, (0, 0, 0), 2)
 
-    end_time = time.time()
-    # Mostrar frutas durante 5 segundos
-    if time.time() - start_show_time <= config.frute_time:
+    now = time.time()
+
+    # Fase de mostrar frutas
+    if now - start_show_time <= config.frute_time:
         for item in current_sequence:
             idx = item["idx"]
             color = item["color"]
             count = item["count"]
             center = centers[idx]
             draw_fruit_count(frame, center, r, color, count)
-    # Después de 5 s ya no se dibujan
+    else:
+        waiting_for_user = True
+
+    # Fase de interacción
+    if waiting_for_user and results.pose_landmarks:
+        lm = results.pose_landmarks.landmark[mp_pose.PoseLandmark.RIGHT_INDEX]
+        hand_x = int(lm.x * w)
+        hand_y = int(lm.y * h)
+        cv2.circle(frame, (hand_x, hand_y), 8, (255, 0, 0), -1)
+
+        if now - last_tap > TAP_COOLDOWN:
+            for idx_circle, (cx, cy) in enumerate(centers):
+                # si este círculo ya fue acertado → ignorar
+                if idx_circle in disabled_indices:
+                    continue
+
+                dx = hand_x - cx
+                dy = hand_y - cy
+                if dx * dx + dy * dy <= r * r:
+                    expected_circle = current_sequence[current_step]["idx"]
+                    if idx_circle == expected_circle:
+                        #ACERTÓ 
+                        hit_item = current_sequence[current_step]
+                        correct_hits.append(hit_item)
+                        disabled_indices.add(idx_circle)
+                        current_step += 1
+                        if current_step >= len(current_sequence):
+                            waiting_for_user = False
+                    else:
+                        #FALLO 
+                        last_error = (cx, cy)
+                        last_error_time = now
+                    last_tap = now
+                    break
+
+    # Dibujar aciertos permanentes (bolitas)
+    for hit in correct_hits:
+        idx = hit["idx"]
+        color = hit["color"]
+        count = hit["count"]
+        center = centers[idx]
+        draw_fruit_count(frame, center, r, color, count)
+
+    # Dibujar cruz de fallo temporal (2s)
+    if last_error is not None and now - last_error_time < 2.0:
+        draw_cross(frame, last_error, r)
 
     cv2.imshow("Juego Frutal", frame)
-
-    #elena 
-            
-    if config.game_time <= 0:
-        frame = np.zeros((int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)), int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), 3), dtype=np.uint8)
-        cv2.putText(frame, f'Score: {final_counter} points', (180, 80), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
-        cv2.putText(frame, f'Presiona Enter para empezar el juego ...', (120, 160), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
-        cv2.putText(frame, f'Presiona ESC para salir', (180, 240), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 128, 0), 2)
-
-        # Tecla Enter para jugar
-        if cv2.waitKey(1) & 0xFF == 13:
-            config.game_time = 90
-            counter = 0
         
-        # Tecla ESC para salir
-        if cv2.waitKey(1) & 0xFF == 27:
-            break
-    else:
-        final_counter = counter
+    # Tecla ESC para salir
+    if cv2.waitKey(1) & 0xFF == 27:
+        break
+
 
 cap.release()
 cv2.destroyAllWindows()
-
-
-
+pose.close()

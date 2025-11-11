@@ -29,13 +29,6 @@ while True:
             x2 = x_positions[i + 1] - r  # termina antes del siguiente círculo
             cv2.line(frame, (x1, y), (x2, y), (200, 200, 200), 2)
 
-    # --- líneas verticales ---
-    for x in x_positions:
-        for j in range(len(y_positions) - 1):
-            y1 = y_positions[j] + r   # empieza después del borde del círculo
-            y2 = y_positions[j + 1] - r  # termina antes del siguiente
-            cv2.line(frame, (x, y1), (x, y2), (200, 200, 200), 2)
-
     # --- círculos ---
     for y in y_positions:
         for x in x_positions:

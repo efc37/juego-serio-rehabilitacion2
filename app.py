@@ -25,12 +25,12 @@ def calculate_distance(point1, point2) -> float:
     distance = np.sqrt((point1[0] - point2[0]) ** 2 + (point1[1] - point2[1]) ** 2)
     return distance
 
-# Crea una nueva capa y una posición random para el objetivo
-def new_circle(padding) -> None:
+# Crea una nueva capa y una posición random para el objetivo ---- NUEVO NIVEL
+'''def new_circle(padding) -> None:
     global circle_layer, random_circle_position
     circle_layer =  np.zeros((int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)), int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), 3), dtype=np.uint8)
     random_circle_position = (np.random.randint(padding, circle_layer.shape[1]-padding), np.random.randint(padding, circle_layer.shape[0]-padding))
-
+'''
 # Inicializar landmarker
 with PoseLandmarker.create_from_options(options) as landmarker:
     cap = cv2.VideoCapture(0)  # Abrir cámara

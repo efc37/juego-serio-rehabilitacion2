@@ -2,6 +2,7 @@ import cv2
 import numpy as np
 import random
 import time
+import sys
 import mediapipe as mp
 from config import config 
 
@@ -18,7 +19,6 @@ hand_options = HandLandmarkerOptions(
 )
 
 # ========= Parámetros del juego =========
-SHOW_DURATION = 5.0
 FRUIT_COLORS = [
     (0, 0, 255),
     (0, 255, 255),
@@ -34,7 +34,7 @@ start_show_time = None
 
 waiting_for_user = False
 current_step = 0
-TAP_COOLDOWN = 0.5
+TAP_COOLDOWN = 8
 last_tap = 0
 
 correct_hits = []          # guardamos los ítems acertados (para redibujarlos)
@@ -136,7 +136,7 @@ with HandLandmarker.create_from_options(hand_options) as landmarker:
         now = time.time()
 
         # ===== fase de mostrar =====
-        if now - start_show_time <= SHOW_DURATION:
+        if now - start_show_time <= config.frute_time:
             for item in current_sequence:
                 idx = item["idx"]
                 color = item["color"]

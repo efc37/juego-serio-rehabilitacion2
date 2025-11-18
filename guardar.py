@@ -43,17 +43,18 @@ last_error = None
 last_error_time = 0
 
 # ========= Puntuaciones =========
-score = 0
-combo = 0                      # racha de aciertos seguidos
-sequence_start_time = None     # para cronómetro global
-last_hit_time = None           # para medir rapidez entre aciertos
+score_base = 0               # puntos base + combo
+score_time = 0               # puntos por rapidez
+combo = 0                    # racha de aciertos seguidos
+best_combo = 0               # mejor racha alcanzada
+sequence_start_time = None   # para cronómetro global (interno)
+last_hit_time = None         # para medir rapidez entre aciertos
 game_over = False
 
 # HUD de último evento (se muestra solo tras acierto/fallo)
 last_ui_event_time = 0.0
 UI_SHOW_SECONDS = 2.0
 last_ui_score = 0
-last_ui_time_points = 0
 last_ui_combo = 0
 
 # Conexiones para dibujar el "esqueleto" de la mano
@@ -202,7 +203,7 @@ with HandLandmarker.create_from_options(hand_options) as landmarker:
             else:
                 if not waiting_for_user:
                     waiting_for_user = True
-                    sequence_start_time = now  # arranca cronómetro
+                    sequence_start_time = now  # arranca cronómetro interno
                     last_hit_time = now       # para rapidez del primer círculo
 
         # ===== fase de interacción =====
@@ -261,17 +262,20 @@ with HandLandmarker.create_from_options(hand_options) as landmarker:
 
                                 time_points = compute_time_points(dt)
 
-                                # puntos base + combo + rapidez
+                                # puntos base + combo
                                 base_points = 10
                                 combo += 1              # sube la racha
+                                if combo > best_combo:
+                                    best_combo = combo
                                 combo_points = combo * 2
-                                gain = base_points + time_points + combo_points
-                                score += gain
 
-                                # actualizar HUD de evento
+                                score_base += base_points + combo_points
+                                score_time += time_points
+                                total_score = score_base + score_time
+
+                                # actualizar HUD de evento (score+combo)
                                 last_ui_event_time = now
-                                last_ui_score = score
-                                last_ui_time_points = time_points
+                                last_ui_score = total_score
                                 last_ui_combo = combo
 
                                 # si completamos los 6
@@ -283,15 +287,17 @@ with HandLandmarker.create_from_options(hand_options) as landmarker:
                                 # ❌ fallo → cruz 2 s, penalización y reset de combo
                                 last_error = (cx, cy)
                                 last_error_time = now
-                                score -= 5
-                                if score < 0:
-                                    score = 0
+
+                                score_base -= 5
+                                if score_base < 0:
+                                    score_base = 0
                                 combo = 0
 
-                                # HUD de evento de fallo (sin puntos por tiempo)
+                                total_score = score_base + score_time
+
+                                # HUD de evento de fallo
                                 last_ui_event_time = now
-                                last_ui_score = score
-                                last_ui_time_points = 0
+                                last_ui_score = total_score
                                 last_ui_combo = combo
 
                             selection_done = True
@@ -312,24 +318,6 @@ with HandLandmarker.create_from_options(hand_options) as landmarker:
         if last_error is not None and now - last_error_time < 2.0:
             draw_cross(frame, last_error, r)
 
-        # ===== Cronómetro arriba a la derecha =====
-        if sequence_start_time is not None and not game_over:
-            elapsed = now - sequence_start_time
-            time_text = f"Tiempo: {elapsed:4.1f}s"
-            font = cv2.FONT_HERSHEY_SIMPLEX
-            (tw, th), _ = cv2.getTextSize(time_text, font, 0.8, 2)
-            x_pos = w - tw - 30
-            y_pos = 40
-            cv2.putText(
-                frame,
-                time_text,
-                (x_pos, y_pos),
-                font,
-                0.8,
-                (0, 0, 0),  # negro
-                2
-            )
-
         # ===== HUD de puntuación SOLO tras acierto/fallo (durante unos segundos) =====
         if not game_over and (now - last_ui_event_time) < UI_SHOW_SECONDS:
             y0 = 80
@@ -344,24 +332,15 @@ with HandLandmarker.create_from_options(hand_options) as landmarker:
             )
             cv2.putText(
                 frame,
-                f"Puntos por tiempo: {last_ui_time_points}",
-                (30, y0 + 35),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.8,
-                (0, 0, 0),
-                2
-            )
-            cv2.putText(
-                frame,
                 f"Combo: {last_ui_combo}",
-                (30, y0 + 70),
+                (30, y0 + 40),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 0.8,
                 (0, 0, 0),
                 2
             )
 
-        # ===== Pantalla final bonita =====
+        # ===== Pantalla final bonita con resumen =====
         if game_over:
             overlay = frame.copy()
             # oscurecer fondo
@@ -369,22 +348,31 @@ with HandLandmarker.create_from_options(hand_options) as landmarker:
             alpha = 0.7
             frame = cv2.addWeighted(overlay, alpha, frame, 1 - alpha, 0)
 
-            title = "¡Juego terminado!"
-            subtitle = f"Puntuacion final: {score}"
-            hint = "Pulsa ESC para salir"
+            total_score = score_base + score_time
+
+            title = "Juego terminado"
+            line1 = f"Score base: {score_base}"
+            line2 = f"Puntos por rapidez: {score_time}"
+            line3 = f"Total: {total_score}"
+            line4 = f"Mejor combo: {best_combo}"
+            hint  = "Pulsa ESC para salir"
 
             font = cv2.FONT_HERSHEY_SIMPLEX
 
-            (tw1, th1), _ = cv2.getTextSize(title, font, 1.5, 3)
-            (tw2, th2), _ = cv2.getTextSize(subtitle, font, 1.2, 2)
-            (tw3, th3), _ = cv2.getTextSize(hint, font, 0.8, 2)
-
+            # Centramos cada línea horizontalmente
             cx_mid = w // 2
             cy_mid = h // 2
 
-            cv2.putText(frame, title, (cx_mid - tw1 // 2, cy_mid - 40), font, 1.5, (255, 255, 255), 3)
-            cv2.putText(frame, subtitle, (cx_mid - tw2 // 2, cy_mid + 10), font, 1.2, (255, 220, 220), 2)
-            cv2.putText(frame, hint, (cx_mid - tw3 // 2, cy_mid + 60), font, 0.8, (200, 200, 200), 2)
+            def put_centered(text, y, scale, color, thickness=2):
+                (tw, th), _ = cv2.getTextSize(text, font, scale, thickness)
+                cv2.putText(frame, text, (cx_mid - tw // 2, y), font, scale, color, thickness)
+
+            put_centered(title,  cy_mid - 80, 1.5, (255, 255, 255), 3)
+            put_centered(line1,  cy_mid - 30, 0.9, (255, 220, 220), 2)
+            put_centered(line2,  cy_mid + 10, 0.9, (255, 220, 220), 2)
+            put_centered(line3,  cy_mid + 50, 1.0, (255, 255, 255), 2)
+            put_centered(line4,  cy_mid + 90, 0.9, (255, 255, 200), 2)
+            put_centered(hint,   cy_mid + 140, 0.8, (200, 200, 200), 2)
 
         cv2.imshow("Juego serio", frame)
         if cv2.waitKey(1) & 0xFF == 27:

@@ -57,6 +57,9 @@ UI_SHOW_SECONDS = 2.0
 last_ui_score = 0
 last_ui_combo = 0
 
+# ========= Pantalla de inicio =========
+show_start_screen = True     # hasta que el usuario pulse ENTER
+
 # Conexiones para dibujar el "esqueleto" de la mano
 HAND_CONNECTIONS = [
     (0, 1), (1, 2), (2, 3), (3, 4),        # pulgar
@@ -146,6 +149,45 @@ with HandLandmarker.create_from_options(hand_options) as landmarker:
 
         frame = cv2.flip(frame, 1)
         h, w = frame.shape[:2]
+
+        # ========= PANTALLA DE INICIO =========
+        if show_start_screen:
+            # Capa rojiza transparente
+            overlay = frame.copy()
+            cv2.rectangle(overlay, (0, 0), (w, h), (200, 180, 255), -1)  # rojo en BGR
+            alpha = 0.45  # transparencia (0 = nada, 1 = solo overlay)
+            frame = cv2.addWeighted(overlay, alpha, frame, 1 - alpha, 0)
+
+            # Texto centrado
+            font = cv2.FONT_HERSHEY_SIMPLEX
+            title = "MotionMind"
+            subtitle = "Pulsa ENTER para empezar"
+            hint = "Pulsa ESC para salir"
+        
+            # Centro de la pantalla
+            cx_mid = w // 2
+            cy_mid = h // 2
+
+            def put_centered(text, y, scale, color, thickness=2):
+                (tw, th), _ = cv2.getTextSize(text, font, scale, thickness)
+                cv2.putText(frame, text, (cx_mid - tw // 2, y), font, scale, color, thickness)
+
+            put_centered(title,    cy_mid - 40, 1.7, (255, 255, 255), 3)
+            put_centered(subtitle, cy_mid + 10, 0.9, (80, 80, 80), 2)
+            put_centered(hint,     cy_mid + 60, 0.7, (80, 80, 80), 2)
+
+            # Mostrar pantalla de inicio y leer teclas
+            cv2.imshow("Juego serio", frame)
+            key = cv2.waitKey(1) & 0xFF
+
+            if key == 27:  # ESC
+                break
+            elif key == 13:  # ENTER
+                show_start_screen = False  # empezamos el juego
+
+            continue  # saltamos la lógica del juego en este frame
+
+        # ========= LÓGICA DEL JUEGO (solo si ya hemos pasado la pantalla de inicio) =========
 
         rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb_frame)
@@ -375,7 +417,8 @@ with HandLandmarker.create_from_options(hand_options) as landmarker:
             put_centered(hint,   cy_mid + 140, 0.8, (200, 200, 200), 2)
 
         cv2.imshow("Juego serio", frame)
-        if cv2.waitKey(1) & 0xFF == 27:
+        key = cv2.waitKey(1) & 0xFF
+        if key == 27:  # ESC
             break
 
     cap.release()

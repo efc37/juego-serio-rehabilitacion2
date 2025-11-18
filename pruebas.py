@@ -506,6 +506,12 @@ with HandLandmarker.create_from_options(hand_options) as landmarker:
     last_hit_time = None         # para medir rapidez entre aciertos
     game_over = False
 
+    # Flag para no guardar resultados infinitas veces
+    game_results_saved = False
+    sesiones = 0
+    best_hist_score = 0
+    evo_text = ""
+
     # HUD
     last_ui_event_time = 0.0
     UI_SHOW_SECONDS = 2.0
@@ -710,45 +716,50 @@ with HandLandmarker.create_from_options(hand_options) as landmarker:
         if game_over:
             total_score = score_base + score_time
 
-            # Guardar en CSV de datos de juego
-            file_exists = os.path.exists(DATA_FILE)
-            with open(DATA_FILE, "a", newline="", encoding="utf-8") as f:
-                writer = csv.writer(f)
-                if not file_exists:
-                    writer.writerow(["nombre", "total_score", "score_time", "best_combo", "timestamp"])
-                writer.writerow([
-                    username,
-                    total_score,
-                    score_time,
-                    best_combo,
-                    time.strftime("%Y-%m-%d %H:%M:%S")
-                ])
+            # ==== Guardar resultados SOLO UNA VEZ ====
+            if not game_results_saved:
+                file_exists = os.path.exists(DATA_FILE)
+                with open(DATA_FILE, "a", newline="", encoding="utf-8") as f:
+                    writer = csv.writer(f)
+                    if not file_exists:
+                        writer.writerow(["nombre", "total_score", "score_time", "best_combo", "timestamp"])
+                    writer.writerow([
+                        username,
+                        total_score,
+                        score_time,
+                        best_combo,
+                        time.strftime("%Y-%m-%d %H:%M:%S")
+                    ])
 
-            # Leer historial del usuario
-            user_scores = []
-            try:
-                with open(DATA_FILE, newline="", encoding="utf-8") as f:
-                    reader = csv.DictReader(f)
-                    for row in reader:
-                        if row["nombre"] == username:
-                            user_scores.append(float(row["total_score"]))
-            except FileNotFoundError:
-                pass
+                # Leer historial del usuario una vez
+                user_scores = []
+                try:
+                    with open(DATA_FILE, newline="", encoding="utf-8") as f:
+                        reader = csv.DictReader(f)
+                        for row in reader:
+                            if row["nombre"] == username:
+                                user_scores.append(float(row["total_score"]))
+                except FileNotFoundError:
+                    pass
 
-            sesiones = len(user_scores)
-            if sesiones >= 2:
-                prev_score = user_scores[-2]
-                if total_score > prev_score:
-                    evo_text = "Has mejorado respecto a tu última sesión. ¡Buen trabajo!"
-                elif total_score < prev_score:
-                    evo_text = "Hoy ha bajado un poco, pero es parte del proceso. ¡Sigue así!"
+                sesiones = len(user_scores)
+                if sesiones >= 2:
+                    prev_score = user_scores[-2]
+                    if total_score > prev_score:
+                        evo_text = "Has mejorado respecto a tu ultima sesion. Buen trabajo!"
+                    elif total_score < prev_score:
+                        evo_text = "Hoy ha bajado un poco, pero es parte del proceso. Sigue asi!"
+                    else:
+                        evo_text = "Has mantenido la misma puntuacion que en la ultima sesion. Estabilidad"
                 else:
-                    evo_text = "Has mantenido la misma puntuación que en la última sesión. Estabilidad"
-            else:
-                evo_text = "Esta es tu primera sesión registrada. A partir de aquí veremos tu evolución."
+                    evo_text = "Esta es tu primera sesion registrada. A partir de aqui veremos tu evolucion."
 
-            best_hist_score = max(user_scores) if user_scores else total_score
+                best_hist_score = max(user_scores) if user_scores else total_score
 
+                # marcamos que ya hemos guardado esta partida
+                game_results_saved = True
+
+            # ==== Dibujar pantalla final (cada frame) ====
             overlay = frame.copy()
             cv2.rectangle(overlay, (0, 0), (w, h), (0, 0, 0), -1)
             alpha = 0.7
@@ -758,8 +769,8 @@ with HandLandmarker.create_from_options(hand_options) as landmarker:
             line1 = f"Score base (incluye combo): {score_base}"
             line2 = f"Puntos por rapidez: {score_time}"
             line3 = f"Total partida: {total_score}"
-            line4 = f"Mejor combo en esta sesión: {best_combo}"
-            line5 = f"Sesiones registradas: {sesiones} | Mejor total histórico: {best_hist_score}"
+            line4 = f"Mejor combo en esta sesion: {best_combo}"
+            line5 = f"Sesiones registradas: {sesiones} | Mejor total historico: {int(best_hist_score)}"
             line6 = evo_text
             hint  = "Pulsa ESC para salir"
 

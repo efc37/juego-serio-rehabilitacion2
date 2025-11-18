@@ -45,6 +45,7 @@ last_error_time = 0
 # ========= Puntuaciones =========
 score_base = 0               # puntos base + combo
 score_time = 0               # puntos por rapidez
+combos = []
 combo = 0                    # racha de aciertos seguidos
 best_combo = 0               # mejor racha alcanzada
 sequence_start_time = None   # para cronómetro global (interno)
@@ -93,11 +94,11 @@ def compute_time_points(dt):
     Devuelve puntos por rapidez según el tiempo (dt en segundos)
     que has tardado en encontrar el siguiente círculo correcto.
     """
-    if dt <= 1.0:
+    if dt <= 3.0:
         return 10
-    elif dt <= 2.0:
+    elif dt <= 5.0:
         return 5
-    elif dt <= 3.0:
+    elif dt <= 8.0:
         return 2
     else:
         return 0
@@ -309,9 +310,14 @@ with HandLandmarker.create_from_options(hand_options) as landmarker:
                                 combo += 1              # sube la racha
                                 if combo > best_combo:
                                     best_combo = combo
-                                combo_points = combo * 2
 
-                                score_base += base_points + combo_points
+                                '''if combo > 1:
+                                    combo_points = combo * 2
+                                else:
+                                    combo_points = 0'''
+
+                                #score_base += base_points + combo_points
+                                score_base += base_points
                                 score_time += time_points
                                 total_score = score_base + score_time
 
@@ -333,15 +339,29 @@ with HandLandmarker.create_from_options(hand_options) as landmarker:
                                 score_base -= 5
                                 if score_base < 0:
                                     score_base = 0
+                                
+                                if combo > 1:
+                                    combos.append(combo)
                                 combo = 0
 
-                                total_score = score_base + score_time
+                                total_score = score_base
+
+                                #total_score = score_base + score_time
 
                                 # HUD de evento de fallo
                                 last_ui_event_time = now
                                 last_ui_score = total_score
                                 last_ui_combo = combo
-
+                            
+                            combo_points = 0
+                            if len(combos) == 0 and combo == 6:
+                                combo_points = 6*2
+                            else:
+                                for i in combos:
+                                    combo_points += i * 2
+                                if combo > 1:
+                                    combo_points += combo * 2
+                            total_score += combo_points
                             selection_done = True
                             break  # salimos del bucle de círculos
 

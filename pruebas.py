@@ -114,12 +114,109 @@ def ensure_users_file():
             writer.writerow(["username", "password"])
 
 
+# ========= REGISTRO / LOGIN CON RATÓN + TECLADO =========
+
+def auth_menu(cap):
+    """Devuelve (username, password) tras registro/login correcto, o sale."""
+    cv2.namedWindow("Juego serio")
+
+    # Estado del clic del ratón
+    mouse_state = {"x": None, "y": None, "clicked": False}
+
+    def mouse_cb(event, x, y, flags, param):
+        if event == cv2.EVENT_LBUTTONDOWN:
+            mouse_state["x"] = x
+            mouse_state["y"] = y
+            mouse_state["clicked"] = True
+
+    cv2.setMouseCallback("Juego serio", mouse_cb)
+
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            cap.release()
+            cv2.destroyAllWindows()
+            sys.exit(0)
+
+        frame = cv2.flip(frame, 1)
+        h, w = frame.shape[:2]
+
+        overlay = frame.copy()
+        cv2.rectangle(overlay, (0, 0), (w, h), (200, 180, 255), -1)
+        alpha = 0.45
+        frame = cv2.addWeighted(overlay, alpha, frame, 1 - alpha, 0)
+
+        title = "MotionMind"
+        option1 = "[1] Registro"
+        option2 = "[2] Inicio de sesion"
+        hint = "Pulsa 1 o 2 o haz clic | ESC para salir"
+
+        # Y de las opciones
+        y_reg = 250
+        y_log = 300
+
+        put_centered(frame, title,   180, 1.7, (255, 255, 255), 3)
+        put_centered(frame, option1, y_reg, 1.0, (50, 50, 50), 2)
+        put_centered(frame, option2, y_log, 1.0, (50, 50, 50), 2)
+        put_centered(frame, hint,    370, 0.8, (80, 80, 80), 2)
+
+        cv2.imshow("Juego serio", frame)
+        key = cv2.waitKey(30) & 0xFF
+
+        # ==== Teclado ====
+        if key == 27:  # ESC
+            cap.release()
+            cv2.destroyAllWindows()
+            sys.exit(0)
+        elif key == ord('1'):
+            u, p = register_user(cap)
+            if u is not None:
+                return u, p
+        elif key == ord('2'):
+            u, p = login_user(cap)
+            if u is not None:
+                return u, p
+
+        # ==== Ratón ====
+        if mouse_state["clicked"]:
+            mx, my = mouse_state["x"], mouse_state["y"]
+            mouse_state["clicked"] = False
+
+            # Banda horizontal clicable
+            x1 = int(w * 0.2)
+            x2 = int(w * 0.8)
+
+            # Clic en Registro
+            if y_reg - 20 <= my <= y_reg + 20 and x1 <= mx <= x2:
+                u, p = register_user(cap)
+                if u is not None:
+                    return u, p
+
+            # Clic en Login
+            if y_log - 20 <= my <= y_log + 20 and x1 <= mx <= x2:
+                u, p = login_user(cap)
+                if u is not None:
+                    return u, p
+
+
 def register_user(cap):
     ensure_users_file()
     username = ""
     password = ""
     error_msg = ""
     entering_password = False  # False → escribiendo usuario, True → escribiendo contraseña
+
+    cv2.namedWindow("Juego serio")
+
+    mouse_state = {"x": None, "y": None, "clicked": False}
+
+    def mouse_cb(event, x, y, flags, param):
+        if event == cv2.EVENT_LBUTTONDOWN:
+            mouse_state["x"] = x
+            mouse_state["y"] = y
+            mouse_state["clicked"] = True
+
+    cv2.setMouseCallback("Juego serio", mouse_cb)
 
     while True:
         ret, frame = cap.read()
@@ -140,16 +237,22 @@ def register_user(cap):
         title = "Registro - MotionMind"
         label_user = "Nombre de usuario (no puede repetirse):"
         label_pass = "Contraseña:"
-        hint = "ENTER para continuar / cambiar campo | ESC para volver"
+        hint = "ENTER cambia campo/confirma | Clic para elegir campo | ESC para volver"
 
         show_user = f"> {username}_"
         show_pass = "> " + ("*" * len(password) + "_")
 
+        y_user = 230
+        y_pass = 330
+
+        color_user = (30, 30, 30) if not entering_password else (100, 100, 100)
+        color_pass = (30, 30, 30) if entering_password else (100, 100, 100)
+
         put_centered(frame, title,      120, 1.2, (255, 255, 255), 3)
         put_centered(frame, label_user, 190, 0.8, (60, 60, 60), 2)
-        put_centered(frame, show_user,  230, 0.9, (30, 30, 30), 2)
+        put_centered(frame, show_user,  y_user, 0.9, color_user, 2)
         put_centered(frame, label_pass, 290, 0.8, (60, 60, 60), 2)
-        put_centered(frame, show_pass,  330, 0.9, (30, 30, 30), 2)
+        put_centered(frame, show_pass,  y_pass, 0.9, color_pass, 2)
         put_centered(frame, hint,       400, 0.7, (80, 80, 80), 2)
 
         if error_msg:
@@ -158,23 +261,22 @@ def register_user(cap):
         cv2.imshow("Juego serio", frame)
         key = cv2.waitKey(30) & 0xFF
 
-        if key == 27:  # ESC → volver al menú
+        # ==== ESC ====
+        if key == 27:
             return None, None
 
-        elif key in (13, 10):  # ENTER
+        # ==== ENTER ====
+        elif key in (13, 10):
             if not entering_password:
-                # Pasamos de usuario a contraseña
                 if not username.strip():
                     error_msg = "El nombre no puede estar vacío."
                 else:
                     error_msg = ""
                     entering_password = True
             else:
-                # Intentamos registrar
                 if not password:
                     error_msg = "La contraseña no puede estar vacía."
                 else:
-                    # Comprobamos que no exista el usuario
                     exists = False
                     with open(USERS_FILE, newline="", encoding="utf-8") as f:
                         reader = csv.DictReader(f)
@@ -185,19 +287,20 @@ def register_user(cap):
                     if exists:
                         error_msg = "Ese nombre de usuario ya existe. Elige otro."
                     else:
-                        # Guardamos usuario nuevo
                         with open(USERS_FILE, "a", newline="", encoding="utf-8") as f:
                             writer = csv.writer(f)
                             writer.writerow([username, password])
                         return username, password
 
-        elif key in (8, 127):  # Backspace
+        # ==== Backspace ====
+        elif key in (8, 127):
             if not entering_password:
                 username = username[:-1]
             else:
                 password = password[:-1]
 
-        elif 32 <= key <= 126:  # caracteres imprimibles
+        # ==== Texto ====
+        elif 32 <= key <= 126:
             ch = chr(key)
             if not entering_password:
                 if len(username) < 20:
@@ -206,6 +309,22 @@ def register_user(cap):
                 if len(password) < 20:
                     password += ch
 
+        # ==== Ratón: elegir campo activo ====
+        if mouse_state["clicked"]:
+            mx, my = mouse_state["x"], mouse_state["y"]
+            mouse_state["clicked"] = False
+
+            x1 = int(w * 0.1)
+            x2 = int(w * 0.9)
+
+            # Campo usuario
+            if y_user - 20 <= my <= y_user + 20 and x1 <= mx <= x2:
+                entering_password = False
+
+            # Campo contraseña
+            if y_pass - 20 <= my <= y_pass + 20 and x1 <= mx <= x2:
+                entering_password = True
+
 
 def login_user(cap):
     ensure_users_file()
@@ -213,6 +332,18 @@ def login_user(cap):
     password = ""
     error_msg = ""
     entering_password = False
+
+    cv2.namedWindow("Juego serio")
+
+    mouse_state = {"x": None, "y": None, "clicked": False}
+
+    def mouse_cb(event, x, y, flags, param):
+        if event == cv2.EVENT_LBUTTONDOWN:
+            mouse_state["x"] = x
+            mouse_state["y"] = y
+            mouse_state["clicked"] = True
+
+    cv2.setMouseCallback("Juego serio", mouse_cb)
 
     while True:
         ret, frame = cap.read()
@@ -232,16 +363,22 @@ def login_user(cap):
         title = "Inicio de sesión - MotionMind"
         label_user = "Nombre de usuario:"
         label_pass = "Contraseña:"
-        hint = "ENTER para continuar / cambiar campo | ESC para volver"
+        hint = "ENTER cambia campo/confirma | Clic para elegir campo | ESC para volver"
 
         show_user = f"> {username}_"
         show_pass = "> " + ("*" * len(password) + "_")
 
+        y_user = 230
+        y_pass = 330
+
+        color_user = (30, 30, 30) if not entering_password else (100, 100, 100)
+        color_pass = (30, 30, 30) if entering_password else (100, 100, 100)
+
         put_centered(frame, title,      120, 1.2, (255, 255, 255), 3)
         put_centered(frame, label_user, 190, 0.8, (60, 60, 60), 2)
-        put_centered(frame, show_user,  230, 0.9, (30, 30, 30), 2)
+        put_centered(frame, show_user,  y_user, 0.9, color_user, 2)
         put_centered(frame, label_pass, 290, 0.8, (60, 60, 60), 2)
-        put_centered(frame, show_pass,  330, 0.9, (30, 30, 30), 2)
+        put_centered(frame, show_pass,  y_pass, 0.9, color_pass, 2)
         put_centered(frame, hint,       400, 0.7, (80, 80, 80), 2)
 
         if error_msg:
@@ -250,10 +387,12 @@ def login_user(cap):
         cv2.imshow("Juego serio", frame)
         key = cv2.waitKey(30) & 0xFF
 
-        if key == 27:  # ESC → volver al menú
+        # ==== ESC ====
+        if key == 27:
             return None, None
 
-        elif key in (13, 10):  # ENTER
+        # ==== ENTER ====
+        elif key in (13, 10):
             if not entering_password:
                 if not username.strip():
                     error_msg = "El nombre no puede estar vacío."
@@ -264,7 +403,6 @@ def login_user(cap):
                 if not password:
                     error_msg = "La contraseña no puede estar vacía."
                 else:
-                    # Comprobamos credenciales
                     ok = False
                     with open(USERS_FILE, newline="", encoding="utf-8") as f:
                         reader = csv.DictReader(f)
@@ -275,15 +413,17 @@ def login_user(cap):
                     if ok:
                         return username, password
                     else:
-                        error_msg = "Usuario o contraseña incorrectos."
+                        error_msg = "Usuario o contrasena incorrectos."
 
-        elif key in (8, 127):  # Backspace
+        # ==== Backspace ====
+        elif key in (8, 127):
             if not entering_password:
                 username = username[:-1]
             else:
                 password = password[:-1]
 
-        elif 32 <= key <= 126:  # caracteres imprimibles
+        # ==== Texto ====
+        elif 32 <= key <= 126:
             ch = chr(key)
             if not entering_password:
                 if len(username) < 20:
@@ -292,49 +432,21 @@ def login_user(cap):
                 if len(password) < 20:
                     password += ch
 
+        # ==== Ratón: elegir campo activo ====
+        if mouse_state["clicked"]:
+            mx, my = mouse_state["x"], mouse_state["y"]
+            mouse_state["clicked"] = False
 
-def auth_menu(cap):
-    """Devuelve (username, password) tras registro/login correcto, o sale."""
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            cap.release()
-            cv2.destroyAllWindows()
-            sys.exit(0)
+            x1 = int(w * 0.1)
+            x2 = int(w * 0.9)
 
-        frame = cv2.flip(frame, 1)
-        h, w = frame.shape[:2]
+            # Campo usuario
+            if y_user - 20 <= my <= y_user + 20 and x1 <= mx <= x2:
+                entering_password = False
 
-        overlay = frame.copy()
-        cv2.rectangle(overlay, (0, 0), (w, h), (200, 180, 255), -1)
-        alpha = 0.45
-        frame = cv2.addWeighted(overlay, alpha, frame, 1 - alpha, 0)
-
-        title = "MotionMind"
-        option1 = "[1] Registro"
-        option2 = "[2] Inicio de sesión"
-        hint = "Pulsa 1 o 2 para elegir | ESC para salir"
-
-        put_centered(frame, title,   180, 1.7, (255, 255, 255), 3)
-        put_centered(frame, option1, 250, 1.0, (50, 50, 50), 2)
-        put_centered(frame, option2, 300, 1.0, (50, 50, 50), 2)
-        put_centered(frame, hint,    370, 0.8, (80, 80, 80), 2)
-
-        cv2.imshow("Juego serio", frame)
-        key = cv2.waitKey(30) & 0xFF
-
-        if key == 27:  # ESC
-            cap.release()
-            cv2.destroyAllWindows()
-            sys.exit(0)
-        elif key == ord('1'):
-            u, p = register_user(cap)
-            if u is not None:
-                return u, p
-        elif key == ord('2'):
-            u, p = login_user(cap)
-            if u is not None:
-                return u, p
+            # Campo contraseña
+            if y_pass - 20 <= my <= y_pass + 20 and x1 <= mx <= x2:
+                entering_password = True
 
 
 # ========= PROGRAMA PRINCIPAL =========
@@ -613,7 +725,7 @@ with HandLandmarker.create_from_options(hand_options) as landmarker:
                 elif total_score < prev_score:
                     evo_text = "Hoy ha bajado un poco, pero es parte del proceso. ¡Sigue así!"
                 else:
-                    evo_text = "Has mantenido la misma puntuación que en la última sesión. Estabilidad 👍"
+                    evo_text = "Has mantenido la misma puntuación que en la última sesión. Estabilidad"
             else:
                 evo_text = "Esta es tu primera sesión registrada. A partir de aquí veremos tu evolución."
 

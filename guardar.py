@@ -3,6 +3,8 @@ import numpy as np
 import random
 import time
 import sys
+import os
+import csv
 import mediapipe as mp
 from config import config 
 
@@ -57,6 +59,12 @@ UI_SHOW_SECONDS = 2.0
 last_ui_score = 0
 last_ui_combo = 0
 
+# ========= Gestión de usuario y CSV =========
+username = ""
+login_done = False
+login_error = ""
+DATA_FILE = "datos_juego_serio.csv"
+
 # Conexiones para dibujar el "esqueleto" de la mano
 HAND_CONNECTIONS = [
     (0, 1), (1, 2), (2, 3), (3, 4),        # pulgar
@@ -69,19 +77,13 @@ HAND_CONNECTIONS = [
 
 def count_extended_fingers(hand_landmarks):
     # Índices (tip, pip) para cada dedo (sin pulgar):
-    # Índice:  tip = 8,  pip = 6
-    # Medio:   tip = 12, pip = 10
-    # Anular:  tip = 16, pip = 14
-    # Meñique: tip = 20, pip = 18
     finger_pairs = [(8, 6), (12, 10), (16, 14), (20, 18)]
     extended = 0
-
     for tip_idx, pip_idx in finger_pairs:
         tip = hand_landmarks[tip_idx]
         pip = hand_landmarks[pip_idx]
         if tip.y < pip.y:
             extended += 1
-
     return extended
 
 
@@ -146,6 +148,70 @@ with HandLandmarker.create_from_options(hand_options) as landmarker:
 
         frame = cv2.flip(frame, 1)
         h, w = frame.shape[:2]
+        now = time.time()
+
+        # ========= PANTALLA DE LOGIN (USUARIO) =========
+        if not login_done:
+            overlay = frame.copy()
+            cv2.rectangle(overlay, (0, 0), (w, h), (200, 180, 255), -1)
+            alpha = 0.45
+            frame = cv2.addWeighted(overlay, alpha, frame, 1 - alpha, 0)
+
+            font = cv2.FONT_HERSHEY_SIMPLEX
+            cx_mid = w // 2
+            cy_mid = h // 2
+
+            def put_centered(text, y, scale, color, thickness=2):
+                (tw, th), _ = cv2.getTextSize(text, font, scale, thickness)
+                cv2.putText(frame, text, (cx_mid - tw // 2, y), font, scale, color, thickness)
+
+            title = "MotionMind"
+            subtitle = "Introduce tu nombre de usuario"
+            prompt = f"> {username}_"  # cursor
+            hint = "ENTER para continuar | ESC para salir"
+
+            put_centered(title,    cy_mid - 80, 1.5, (255, 255, 255), 3)
+            put_centered(subtitle, cy_mid - 20, 0.9, (60, 60, 60), 2)
+            put_centered(prompt,   cy_mid + 20, 0.9, (30, 30, 30), 2)
+            put_centered(hint,     cy_mid + 70, 0.7, (80, 80, 80), 2)
+
+            if login_error:
+                put_centered(login_error, cy_mid + 110, 0.7, (0, 0, 255), 2)
+
+            cv2.imshow("Juego serio", frame)
+            key = cv2.waitKey(30) & 0xFF
+
+            if key == 27:  # ESC
+                break
+            elif key in (13, 10):  # ENTER
+                entered = username.strip()
+                if not entered:
+                    login_error = "El nombre no puede estar vacío."
+                else:
+                    # Contar cuántas veces existe este nombre en el CSV
+                    count_same = 0
+                    if os.path.exists(DATA_FILE):
+                        with open(DATA_FILE, newline="", encoding="utf-8") as f:
+                            reader = csv.DictReader(f)
+                            for row in reader:
+                                if row["nombre"] == entered:
+                                    count_same += 1
+                    if count_same >= 2:
+                        login_error = "Ese nombre ya se ha usado 2 veces. Elige otro."
+                    else:
+                        username = entered
+                        login_done = True
+                        login_error = ""
+                continue
+            elif key in (8, 255):  # Backspace
+                username = username[:-1]
+            elif 32 <= key <= 126:  # caracteres imprimibles
+                if len(username) < 15:
+                    username += chr(key)
+
+            continue  # aún en pantalla de login, no seguimos al juego
+
+        # ========= LÓGICA DEL JUEGO =========
 
         rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb_frame)
@@ -342,19 +408,61 @@ with HandLandmarker.create_from_options(hand_options) as landmarker:
 
         # ===== Pantalla final bonita con resumen =====
         if game_over:
+            # calcular total de la partida actual
+            total_score = score_base + score_time
+
+            # ===== Guardar en CSV =====
+            file_exists = os.path.exists(DATA_FILE)
+            with open(DATA_FILE, "a", newline="", encoding="utf-8") as f:
+                writer = csv.writer(f)
+                if not file_exists:
+                    writer.writerow(["nombre", "total_score", "score_time", "best_combo", "timestamp"])
+                writer.writerow([
+                    username,
+                    total_score,
+                    score_time,
+                    best_combo,
+                    time.strftime("%Y-%m-%d %H:%M:%S")
+                ])
+
+            # ===== Leer historial de este usuario para ver evolución =====
+            user_scores = []
+            try:
+                with open(DATA_FILE, newline="", encoding="utf-8") as f:
+                    reader = csv.DictReader(f)
+                    for row in reader:
+                        if row["nombre"] == username:
+                            user_scores.append(float(row["total_score"]))
+            except FileNotFoundError:
+                pass
+
+            sesiones = len(user_scores)
+            if sesiones >= 2:
+                prev_score = user_scores[-2]
+                if total_score > prev_score:
+                    evo_text = "Has mejorado respecto a tu última sesión."
+                elif total_score < prev_score:
+                    evo_text = "Esta vez la puntuación ha bajado un poco, ¡ánimo!"
+                else:
+                    evo_text = "Has mantenido la misma puntuación que en la última sesión."
+            else:
+                evo_text = "Esta es tu primera sesión registrada."
+
+            best_hist_score = max(user_scores) if user_scores else total_score
+
             overlay = frame.copy()
             # oscurecer fondo
             cv2.rectangle(overlay, (0, 0), (w, h), (0, 0, 0), -1)
             alpha = 0.7
             frame = cv2.addWeighted(overlay, alpha, frame, 1 - alpha, 0)
 
-            total_score = score_base + score_time
-
-            title = "Juego terminado"
-            line1 = f"Score base: {score_base}"
+            title = f"Juego terminado - {username}"
+            line1 = f"Score base (incluye combo): {score_base}"
             line2 = f"Puntos por rapidez: {score_time}"
-            line3 = f"Total: {total_score}"
-            line4 = f"Mejor combo: {best_combo}"
+            line3 = f"Total partida: {total_score}"
+            line4 = f"Mejor combo en esta sesión: {best_combo}"
+            line5 = f"Sesiones registradas: {sesiones} | Mejor total histórico: {best_hist_score}"
+            line6 = evo_text
             hint  = "Pulsa ESC para salir"
 
             font = cv2.FONT_HERSHEY_SIMPLEX
@@ -367,12 +475,14 @@ with HandLandmarker.create_from_options(hand_options) as landmarker:
                 (tw, th), _ = cv2.getTextSize(text, font, scale, thickness)
                 cv2.putText(frame, text, (cx_mid - tw // 2, y), font, scale, color, thickness)
 
-            put_centered(title,  cy_mid - 80, 1.5, (255, 255, 255), 3)
-            put_centered(line1,  cy_mid - 30, 0.9, (255, 220, 220), 2)
-            put_centered(line2,  cy_mid + 10, 0.9, (255, 220, 220), 2)
-            put_centered(line3,  cy_mid + 50, 1.0, (255, 255, 255), 2)
-            put_centered(line4,  cy_mid + 90, 0.9, (255, 255, 200), 2)
-            put_centered(hint,   cy_mid + 140, 0.8, (200, 200, 200), 2)
+            put_centered(title,  cy_mid - 120, 1.3, (255, 255, 255), 3)
+            put_centered(line1,  cy_mid - 70, 0.8, (255, 220, 220), 2)
+            put_centered(line2,  cy_mid - 35, 0.8, (255, 220, 220), 2)
+            put_centered(line3,  cy_mid,      0.9, (255, 255, 255), 2)
+            put_centered(line4,  cy_mid + 35, 0.8, (255, 255, 200), 2)
+            put_centered(line5,  cy_mid + 70, 0.7, (220, 220, 220), 2)
+            put_centered(line6,  cy_mid + 105,0.7, (220, 220, 255), 2)
+            put_centered(hint,   cy_mid + 145,0.8, (200, 200, 200), 2)
 
         cv2.imshow("Juego serio", frame)
         if cv2.waitKey(1) & 0xFF == 27:

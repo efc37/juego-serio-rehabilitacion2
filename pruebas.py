@@ -107,6 +107,25 @@ def put_centered(frame, text, y, scale, color, thickness=2):
     cv2.putText(frame, text, (cx_mid - tw // 2, y), font, scale, color, thickness)
 
 
+def put_centered_clickable(frame, text, y, scale, color, thickness, rects_dict, key):
+    """
+    Dibuja texto centrado y guarda el rectángulo clicable exacto en rects_dict[key]
+    """
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    h, w = frame.shape[:2]
+    cx_mid = w // 2
+    (tw, th), baseline = cv2.getTextSize(text, font, scale, thickness)
+    x = cx_mid - tw // 2
+    # Dibujamos el texto
+    cv2.putText(frame, text, (x, y), font, scale, color, thickness)
+    # Rectángulo que ocupa el texto
+    x1 = x
+    y1 = y - th
+    x2 = x + tw
+    y2 = y + baseline
+    rects_dict[key] = (x1, y1, x2, y2)
+
+
 def ensure_users_file():
     if not os.path.exists(USERS_FILE):
         with open(USERS_FILE, "w", newline="", encoding="utf-8") as f:
@@ -155,9 +174,12 @@ def auth_menu(cap):
         y_reg = 250
         y_log = 300
 
+        # Diccionario de rectángulos clicables para este frame
+        click_rects = {}
+
         put_centered(frame, title,   180, 1.7, (255, 255, 255), 3)
-        put_centered(frame, option1, y_reg, 1.0, (50, 50, 50), 2)
-        put_centered(frame, option2, y_log, 1.0, (50, 50, 50), 2)
+        put_centered_clickable(frame, option1, y_reg, 1.0, (50, 50, 50), 2, click_rects, "register")
+        put_centered_clickable(frame, option2, y_log, 1.0, (50, 50, 50), 2, click_rects, "login")
         put_centered(frame, hint,    370, 0.8, (80, 80, 80), 2)
 
         cv2.imshow("Juego serio", frame)
@@ -182,21 +204,18 @@ def auth_menu(cap):
             mx, my = mouse_state["x"], mouse_state["y"]
             mouse_state["clicked"] = False
 
-            # Banda horizontal clicable
-            x1 = int(w * 0.2)
-            x2 = int(w * 0.8)
-
-            # Clic en Registro
-            if y_reg - 20 <= my <= y_reg + 20 and x1 <= mx <= x2:
-                u, p = register_user(cap)
-                if u is not None:
-                    return u, p
-
-            # Clic en Login
-            if y_log - 20 <= my <= y_log + 20 and x1 <= mx <= x2:
-                u, p = login_user(cap)
-                if u is not None:
-                    return u, p
+            # Comprobamos en qué rectángulo ha caído el clic
+            for name, (x1, y1, x2, y2) in click_rects.items():
+                if x1 <= mx <= x2 and y1 <= my <= y2:
+                    if name == "register":
+                        u, p = register_user(cap)
+                        if u is not None:
+                            return u, p
+                    elif name == "login":
+                        u, p = login_user(cap)
+                        if u is not None:
+                            return u, p
+                    break
 
 
 def register_user(cap):
@@ -248,11 +267,14 @@ def register_user(cap):
         color_user = (30, 30, 30) if not entering_password else (100, 100, 100)
         color_pass = (30, 30, 30) if entering_password else (100, 100, 100)
 
+        # Rectángulos clicables de los campos
+        click_rects = {}
+
         put_centered(frame, title,      120, 1.2, (255, 255, 255), 3)
         put_centered(frame, label_user, 190, 0.8, (60, 60, 60), 2)
-        put_centered(frame, show_user,  y_user, 0.9, color_user, 2)
+        put_centered_clickable(frame, show_user,  y_user, 0.9, color_user, 2, click_rects, "user_field")
         put_centered(frame, label_pass, 290, 0.8, (60, 60, 60), 2)
-        put_centered(frame, show_pass,  y_pass, 0.9, color_pass, 2)
+        put_centered_clickable(frame, show_pass,  y_pass, 0.9, color_pass, 2, click_rects, "pass_field")
         put_centered(frame, hint,       400, 0.7, (80, 80, 80), 2)
 
         if error_msg:
@@ -314,16 +336,13 @@ def register_user(cap):
             mx, my = mouse_state["x"], mouse_state["y"]
             mouse_state["clicked"] = False
 
-            x1 = int(w * 0.1)
-            x2 = int(w * 0.9)
-
-            # Campo usuario
-            if y_user - 20 <= my <= y_user + 20 and x1 <= mx <= x2:
-                entering_password = False
-
-            # Campo contraseña
-            if y_pass - 20 <= my <= y_pass + 20 and x1 <= mx <= x2:
-                entering_password = True
+            for name, (x1, y1, x2, y2) in click_rects.items():
+                if x1 <= mx <= x2 and y1 <= my <= y2:
+                    if name == "user_field":
+                        entering_password = False
+                    elif name == "pass_field":
+                        entering_password = True
+                    break
 
 
 def login_user(cap):
@@ -374,11 +393,13 @@ def login_user(cap):
         color_user = (30, 30, 30) if not entering_password else (100, 100, 100)
         color_pass = (30, 30, 30) if entering_password else (100, 100, 100)
 
+        click_rects = {}
+
         put_centered(frame, title,      120, 1.2, (255, 255, 255), 3)
         put_centered(frame, label_user, 190, 0.8, (60, 60, 60), 2)
-        put_centered(frame, show_user,  y_user, 0.9, color_user, 2)
+        put_centered_clickable(frame, show_user,  y_user, 0.9, color_user, 2, click_rects, "user_field")
         put_centered(frame, label_pass, 290, 0.8, (60, 60, 60), 2)
-        put_centered(frame, show_pass,  y_pass, 0.9, color_pass, 2)
+        put_centered_clickable(frame, show_pass,  y_pass, 0.9, color_pass, 2, click_rects, "pass_field")
         put_centered(frame, hint,       400, 0.7, (80, 80, 80), 2)
 
         if error_msg:
@@ -437,16 +458,13 @@ def login_user(cap):
             mx, my = mouse_state["x"], mouse_state["y"]
             mouse_state["clicked"] = False
 
-            x1 = int(w * 0.1)
-            x2 = int(w * 0.9)
-
-            # Campo usuario
-            if y_user - 20 <= my <= y_user + 20 and x1 <= mx <= x2:
-                entering_password = False
-
-            # Campo contraseña
-            if y_pass - 20 <= my <= y_pass + 20 and x1 <= mx <= x2:
-                entering_password = True
+            for name, (x1, y1, x2, y2) in click_rects.items():
+                if x1 <= mx <= x2 and y1 <= my <= y2:
+                    if name == "user_field":
+                        entering_password = False
+                    elif name == "pass_field":
+                        entering_password = True
+                    break
 
 
 # ========= PROGRAMA PRINCIPAL =========

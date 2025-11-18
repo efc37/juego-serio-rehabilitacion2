@@ -43,11 +43,12 @@ last_error = None
 last_error_time = 0
 
 # ========= Puntuaciones =========
-score_base = 0               # puntos base + combo
 score_time = 0               # puntos por rapidez
-combos = []
-combo = 0                    # racha de aciertos seguidos
+score_combo = 0              # bonus de combos (combo_len * 2 por cada racha >= 2)
+combo = 0                    # racha actual de aciertos seguidos
 best_combo = 0               # mejor racha alcanzada
+hits = 0                     # número de aciertos
+fails = 0                    # número de fallos
 sequence_start_time = None   # para cronómetro global (interno)
 last_hit_time = None         # para medir rapidez entre aciertos
 game_over = False
@@ -72,11 +73,6 @@ HAND_CONNECTIONS = [
 
 
 def count_extended_fingers(hand_landmarks):
-    # Índices (tip, pip) para cada dedo (sin pulgar):
-    # Índice:  tip = 8,  pip = 6
-    # Medio:   tip = 12, pip = 10
-    # Anular:  tip = 16, pip = 14
-    # Meñique: tip = 20, pip = 18
     finger_pairs = [(8, 6), (12, 10), (16, 14), (20, 18)]
     extended = 0
 
@@ -150,22 +146,20 @@ with HandLandmarker.create_from_options(hand_options) as landmarker:
 
         frame = cv2.flip(frame, 1)
         h, w = frame.shape[:2]
+        now = time.time()
 
         # ========= PANTALLA DE INICIO =========
         if show_start_screen:
-            # Capa rojiza transparente
             overlay = frame.copy()
-            cv2.rectangle(overlay, (0, 0), (w, h), (200, 180, 255), -1)  # rojo en BGR
-            alpha = 0.45  # transparencia (0 = nada, 1 = solo overlay)
+            cv2.rectangle(overlay, (0, 0), (w, h), (200, 180, 255), -1)
+            alpha = 0.45
             frame = cv2.addWeighted(overlay, alpha, frame, 1 - alpha, 0)
 
-            # Texto centrado
             font = cv2.FONT_HERSHEY_SIMPLEX
             title = "MotionMind"
             subtitle = "Pulsa ENTER para empezar"
             hint = "Pulsa ESC para salir"
-        
-            # Centro de la pantalla
+
             cx_mid = w // 2
             cy_mid = h // 2
 
@@ -177,18 +171,17 @@ with HandLandmarker.create_from_options(hand_options) as landmarker:
             put_centered(subtitle, cy_mid + 10, 0.9, (80, 80, 80), 2)
             put_centered(hint,     cy_mid + 60, 0.7, (80, 80, 80), 2)
 
-            # Mostrar pantalla de inicio y leer teclas
             cv2.imshow("Juego serio", frame)
             key = cv2.waitKey(1) & 0xFF
 
             if key == 27:  # ESC
                 break
             elif key == 13:  # ENTER
-                show_start_screen = False  # empezamos el juego
+                show_start_screen = False
 
             continue  # saltamos la lógica del juego en este frame
 
-        # ========= LÓGICA DEL JUEGO (solo si ya hemos pasado la pantalla de inicio) =========
+        # ========= LÓGICA DEL JUEGO =========
 
         rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb_frame)
@@ -212,7 +205,7 @@ with HandLandmarker.create_from_options(hand_options) as landmarker:
                 count = i + 1
                 seq.append({"idx": idx, "color": color, "count": count})
             current_sequence = seq
-            start_show_time = time.time()
+            start_show_time = now
             sequence_generated = True
 
         # dibujar líneas (parando en el borde)
@@ -232,8 +225,6 @@ with HandLandmarker.create_from_options(hand_options) as landmarker:
         for (cx, cy) in centers:
             cv2.circle(frame, (cx, cy), r, (0, 0, 0), 2)
 
-        now = time.time()
-
         # ===== fase de mostrar secuencia =====
         if not game_over:
             if now - start_show_time <= config.frute_time:
@@ -246,31 +237,27 @@ with HandLandmarker.create_from_options(hand_options) as landmarker:
             else:
                 if not waiting_for_user:
                     waiting_for_user = True
-                    sequence_start_time = now  # arranca cronómetro interno
-                    last_hit_time = now       # para rapidez del primer círculo
+                    sequence_start_time = now
+                    last_hit_time = now
 
         # ===== fase de interacción =====
         if not game_over and waiting_for_user and result.hand_landmarks:
-            selection_done = False  # para cortar si alguna mano selecciona
+            selection_done = False
 
-            # Recorremos TODAS las manos detectadas
             for hand_landmarks in result.hand_landmarks:
-                # 1) dedos extendidos / palma abierta
                 extended = count_extended_fingers(hand_landmarks)
-                is_open_palm = (extended >= 4)   # puedes ajustar el umbral
+                is_open_palm = (extended >= 4)
 
-                # 2) usamos la punta del índice como punto "principal"
                 lm_index = hand_landmarks[8]
                 hand_x = int(lm_index.x * w)
                 hand_y = int(lm_index.y * h)
 
-                # 3) dibujar TODOS los landmarks (puntos) en rosa pastel
+                # dibujar landmarks
                 for lm in hand_landmarks:
                     px = int(lm.x * w)
                     py = int(lm.y * h)
                     cv2.circle(frame, (px, py), 5, (203, 192, 255), -1)
 
-                # 4) dibujar líneas del esqueleto en lila pastel
                 for start_idx, end_idx in HAND_CONNECTIONS:
                     p1 = hand_landmarks[start_idx]
                     p2 = hand_landmarks[end_idx]
@@ -278,7 +265,6 @@ with HandLandmarker.create_from_options(hand_options) as landmarker:
                     x2, y2 = int(p2.x * w), int(p2.y * h)
                     cv2.line(frame, (x1, y1), (x2, y2), (220, 208, 255), 2)
 
-                # 5) Selección: esta mano puede elegir si tiene la palma abierta
                 if is_open_palm:
                     for idx_circle, (cx, cy) in enumerate(centers):
                         if idx_circle in disabled_indices:
@@ -290,13 +276,16 @@ with HandLandmarker.create_from_options(hand_options) as landmarker:
                             expected_circle = current_sequence[current_step]["idx"]
 
                             if idx_circle == expected_circle:
-                                # ✅ acierto
+                                # ========= ✅ ACIERTO =========
                                 hit_item = current_sequence[current_step]
                                 correct_hits.append(hit_item)
                                 disabled_indices.add(idx_circle)
                                 current_step += 1
 
-                                # calcular rapidez desde el último acierto
+                                # contar acierto
+                                hits += 1
+
+                                # tiempo desde el último acierto
                                 if last_hit_time is None:
                                     dt = now - sequence_start_time
                                 else:
@@ -304,71 +293,58 @@ with HandLandmarker.create_from_options(hand_options) as landmarker:
                                 last_hit_time = now
 
                                 time_points = compute_time_points(dt)
+                                score_time += time_points
 
-                                # puntos base + combo
-                                base_points = 10
-                                combo += 1              # sube la racha
+                                # combo actual
+                                combo += 1
                                 if combo > best_combo:
                                     best_combo = combo
 
-                                '''if combo > 1:
-                                    combo_points = combo * 2
-                                else:
-                                    combo_points = 0'''
-
-                                #score_base += base_points + combo_points
-                                score_base += base_points
-                                score_time += time_points
-                                total_score = score_base + score_time
-
-                                # actualizar HUD de evento (score+combo)
-                                last_ui_event_time = now
-                                last_ui_score = total_score
-                                last_ui_combo = combo
-
-                                # si completamos los 6
+                                # si completamos todos los círculos → finalizamos combo también
                                 if current_step >= len(current_sequence):
                                     waiting_for_user = False
                                     game_over = True
+                                    if combo >= 2:
+                                        score_combo += combo * 2
+                                        combo = 0
 
-                            else:
-                                # ❌ fallo → cruz 2 s, penalización y reset de combo
-                                last_error = (cx, cy)
-                                last_error_time = now
-
-                                score_base -= 5
-                                if score_base < 0:
-                                    score_base = 0
-                                
-                                if combo > 1:
-                                    combos.append(combo)
-                                combo = 0
-
-                                total_score = score_base
-
-                                #total_score = score_base + score_time
-
-                                # HUD de evento de fallo
+                                # actualizar HUD
+                                score_base = max(0, hits * 10 - fails * 5)
+                                total_score = score_base + score_time + score_combo
                                 last_ui_event_time = now
                                 last_ui_score = total_score
                                 last_ui_combo = combo
-                            
-                            combo_points = 0
-                            if len(combos) == 0 and combo == 6:
-                                combo_points = 6*2
+
                             else:
-                                for i in combos:
-                                    combo_points += i * 2
-                                if combo > 1:
-                                    combo_points += combo * 2
-                            total_score += combo_points
+                                # ========= ❌ FALLO =========
+                                # Solo contamos el fallo si NO estamos ya dibujando una X reciente
+                                if (last_error is None) or (now - last_error_time >= 2.0):
+                                    last_error = (cx, cy)
+                                    last_error_time = now
+
+                                    # contar fallo
+                                    fails += 1
+
+                                    # cerrar combo si había racha >= 2
+                                    if combo >= 2:
+                                        score_combo += combo * 2
+                                    combo = 0
+
+                                    # actualizar HUD
+                                    score_base = max(0, hits * 10 - fails * 5)
+                                    total_score = score_base + score_time + score_combo
+                                    last_ui_event_time = now
+                                    last_ui_score = total_score
+                                    last_ui_combo = combo
+                                # si aún seguimos dentro de los 2s de la X anterior, no sumamos más fallos
+
                             selection_done = True
-                            break  # salimos del bucle de círculos
+                            break
 
                 if selection_done or game_over:
-                    break  # salimos del bucle de manos
+                    break
 
-        # dibujar aciertos permanentes (bolitas correctas)
+        # dibujar aciertos permanentes
         for hit in correct_hits:
             idx = hit["idx"]
             color = hit["color"]
@@ -376,11 +352,11 @@ with HandLandmarker.create_from_options(hand_options) as landmarker:
             center = centers[idx]
             draw_fruit_count(frame, center, r, color, count)
 
-        # dibujar cruz temporal (2 s)
+        # dibujar cruz temporal (X) durante 2 segundos
         if last_error is not None and now - last_error_time < 2.0:
             draw_cross(frame, last_error, r)
 
-        # ===== HUD de puntuación SOLO tras acierto/fallo (durante unos segundos) =====
+        # ===== HUD de puntuación tras acierto/fallo =====
         if not game_over and (now - last_ui_event_time) < UI_SHOW_SECONDS:
             y0 = 80
             cv2.putText(
@@ -389,7 +365,7 @@ with HandLandmarker.create_from_options(hand_options) as landmarker:
                 (30, y0),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 0.9,
-                (0, 0, 0),  # negro
+                (0, 0, 0),
                 2
             )
             cv2.putText(
@@ -402,26 +378,29 @@ with HandLandmarker.create_from_options(hand_options) as landmarker:
                 2
             )
 
-        # ===== Pantalla final bonita con resumen =====
+        # ===== Pantalla final =====
         if game_over:
+            # por si acaso termina sin fallo y aún queda combo abierto
+            if combo >= 2:
+                score_combo += combo * 2
+                combo = 0
+
+            score_base = max(0, hits * 10 - fails * 5)
+            total_score = score_base + score_time + score_combo
+
             overlay = frame.copy()
-            # oscurecer fondo
             cv2.rectangle(overlay, (0, 0), (w, h), (0, 0, 0), -1)
             alpha = 0.7
             frame = cv2.addWeighted(overlay, alpha, frame, 1 - alpha, 0)
 
-            total_score = score_base + score_time
-
             title = "Juego terminado"
-            line1 = f"Score base: {score_base}"
-            line2 = f"Puntos por rapidez: {score_time}"
-            line3 = f"Total: {total_score}"
-            line4 = f"Mejor combo: {best_combo}"
+            line1 = f"Score base + bonus: {score_base+score_combo}  (hits={hits}, fails={fails})"
+            line3 = f"Puntos por rapidez: {score_time}"
+            line4 = f"Total: {total_score}"
+            line5 = f"Mejor combo: {best_combo}"
             hint  = "Pulsa ESC para salir"
 
             font = cv2.FONT_HERSHEY_SIMPLEX
-
-            # Centramos cada línea horizontalmente
             cx_mid = w // 2
             cy_mid = h // 2
 
@@ -429,12 +408,12 @@ with HandLandmarker.create_from_options(hand_options) as landmarker:
                 (tw, th), _ = cv2.getTextSize(text, font, scale, thickness)
                 cv2.putText(frame, text, (cx_mid - tw // 2, y), font, scale, color, thickness)
 
-            put_centered(title,  cy_mid - 80, 1.5, (255, 255, 255), 3)
-            put_centered(line1,  cy_mid - 30, 0.9, (255, 220, 220), 2)
-            put_centered(line2,  cy_mid + 10, 0.9, (255, 220, 220), 2)
-            put_centered(line3,  cy_mid + 50, 1.0, (255, 255, 255), 2)
-            put_centered(line4,  cy_mid + 90, 0.9, (255, 255, 200), 2)
-            put_centered(hint,   cy_mid + 140, 0.8, (200, 200, 200), 2)
+            put_centered(title,  cy_mid - 100, 1.5, (255, 255, 255), 3)
+            put_centered(line1,  cy_mid - 50, 0.8, (255, 220, 220), 2)
+            put_centered(line3,  cy_mid + 20, 0.8, (255, 220, 220), 2)
+            put_centered(line4,  cy_mid + 55, 0.9, (255, 255, 255), 2)
+            put_centered(line5,  cy_mid + 90, 0.8, (255, 255, 200), 2)
+            put_centered(hint,   cy_mid + 130, 0.8, (200, 200, 200), 2)
 
         cv2.imshow("Juego serio", frame)
         key = cv2.waitKey(1) & 0xFF

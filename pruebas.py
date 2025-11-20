@@ -34,6 +34,17 @@ FRUIT_COLORS = [
 USERS_FILE = "usuarios.csv"
 DATA_FILE = "datos_juego_serio.csv"
 
+# === Multi-nivel: definición de niveles ===
+# (nombre_nivel, longitud_secuencia, penalizacion_fallo, tiempo_mostrar_secuencia)
+LEVELS = [
+    ("Facil",   3, 8, 3.0),   # 3 círculos, -8 por fallo, 3s para memorizar
+    ("Medio",   6, 5, 4.5),   # 6 círculos, -5 por fallo, 4.5s para memorizar
+    ("Dificil", 8, 2, 6.0)    # 8 círculos, -2 por fallo, 6s para memorizar
+]
+
+# Tiempo que se mantiene en pantalla el último acierto antes de cambiar de nivel
+LEVEL_TRANSITION_DELAY = 1.5
+
 # Conexiones para dibujar el "esqueleto" de la mano
 HAND_CONNECTIONS = [
     (0, 1), (1, 2), (2, 3), (3, 4),        # pulgar
@@ -158,8 +169,7 @@ def auth_menu(cap):
             cv2.destroyAllWindows()
             sys.exit(0)
 
-        # IMPORTANTE: al volver de login/registro, el callback puede haber cambiado.
-        # Lo reinstalamos aquí en cada iteración del menú.
+        # Reinstalamos el callback del menú por si un submenú lo cambió
         cv2.setMouseCallback("Juego serio", mouse_cb)
 
         frame = cv2.flip(frame, 1)
@@ -195,7 +205,6 @@ def auth_menu(cap):
             cap.release()
             cv2.destroyAllWindows()
             sys.exit(0)
-
         elif key == ord('1'):
             u, p = register_user(cap)
             # Al volver, reiniciamos el estado del ratón y el callback
@@ -203,7 +212,6 @@ def auth_menu(cap):
             cv2.setMouseCallback("Juego serio", mouse_cb)
             if u is not None:
                 return u, p
-
         elif key == ord('2'):
             u, p = login_user(cap)
             # Al volver, reiniciamos el estado del ratón y el callback
@@ -222,20 +230,18 @@ def auth_menu(cap):
                 if x1 <= mx <= x2 and y1 <= my <= y2:
                     if name == "register":
                         u, p = register_user(cap)
-                        # Al volver, reiniciamos estado y callback
                         mouse_state = {"x": None, "y": None, "clicked": False}
                         cv2.setMouseCallback("Juego serio", mouse_cb)
                         if u is not None:
                             return u, p
-
                     elif name == "login":
                         u, p = login_user(cap)
-                        # Al volver, reiniciamos estado y callback
                         mouse_state = {"x": None, "y": None, "clicked": False}
                         cv2.setMouseCallback("Juego serio", mouse_cb)
                         if u is not None:
                             return u, p
                     break
+
 
 def register_user(cap):
     ensure_users_file()
@@ -362,6 +368,7 @@ def register_user(cap):
                     elif name == "pass_field":
                         entering_password = True
                     break
+
 
 def login_user(cap):
     ensure_users_file()
@@ -502,29 +509,16 @@ with HandLandmarker.create_from_options(hand_options) as landmarker:
     username, _ = auth_menu(cap)
 
     # ========= INICIALIZAR ESTADO DEL JUEGO =========
-    sequence_generated = False
-    current_sequence = []
-    start_show_time = None
-
-    waiting_for_user = False
-    current_step = 0
-
-    correct_hits = []          # ítems acertados (para redibujarlos)
-    disabled_indices = set()   # círculos que ya no reaccionan
-
-    last_error = None
-    last_error_time = 0
-
-    # Puntuaciones
-    score_base = 0               # puntos base + combo
-    score_time = 0               # puntos por rapidez
+    # Estado general
+    score_base = 0               # puntos base + combo (acumula entre niveles)
+    score_time = 0               # puntos por rapidez (acumula entre niveles)
     combo = 0                    # racha de aciertos seguidos
-    best_combo = 0               # mejor racha alcanzada
-    sequence_start_time = None   # para cronómetro global (interno)
-    last_hit_time = None         # para medir rapidez entre aciertos
+    best_combo = 0               # mejor racha alcanzada en toda la partida
+    sequence_start_time = None
+    last_hit_time = None
     game_over = False
 
-    # Flag para no guardar resultados infinitas veces
+    # Flag para no guardar resultados múltiples veces
     game_results_saved = False
     sesiones = 0
     best_hist_score = 0
@@ -535,6 +529,24 @@ with HandLandmarker.create_from_options(hand_options) as landmarker:
     UI_SHOW_SECONDS = 2.0
     last_ui_score = 0
     last_ui_combo = 0
+
+    # Multi-nivel: índice de nivel actual
+    current_level_idx = 0  # 0 = fácil, 1 = medio, 2 = difícil
+
+    # Estado de nivel (se resetea al cambiar de nivel)
+    sequence_generated = False
+    current_sequence = []
+    start_show_time = None
+    waiting_for_user = False
+    current_step = 0
+    correct_hits = []          # ítems acertados (para redibujarlos)
+    disabled_indices = set()   # círculos que ya no reaccionan
+    last_error = None
+    last_error_time = 0
+
+    # Nuevo: control de final de nivel con delay
+    level_completed = False
+    level_completed_time = None
 
     # ========= BUCLE PRINCIPAL DEL JUEGO =========
     while True:
@@ -558,9 +570,12 @@ with HandLandmarker.create_from_options(hand_options) as landmarker:
         y_positions = np.linspace(y_margin, h - y_margin, 3, dtype=int)
         centers = [(x, y) for y in y_positions for x in x_positions]  # 12 círculos
 
-        # generar secuencia SOLO una vez
+        # Info del nivel actual (nombre, longitud secuencia, penalización, tiempo de memorización)
+        level_name, level_len, level_penalty, level_show_time = LEVELS[current_level_idx]
+
+        # generar secuencia SOLO una vez por nivel
         if not sequence_generated:
-            chosen_indices = random.sample(range(len(centers)), 6)
+            chosen_indices = random.sample(range(len(centers)), level_len)
             seq = []
             for i, idx in enumerate(chosen_indices):
                 color = FRUIT_COLORS[i % len(FRUIT_COLORS)]
@@ -589,9 +604,21 @@ with HandLandmarker.create_from_options(hand_options) as landmarker:
 
         now = time.time()
 
+        # Mostrar el nivel actual en pantalla
+        cv2.putText(
+            frame,
+            f"Nivel: {level_name}",
+            (w - 260, 40),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.8,
+            (0, 0, 0),
+            2
+        )
+
         # ===== fase de mostrar secuencia =====
-        if not game_over:
-            if now - start_show_time <= config.frute_time:
+        # Solo si no ha terminado aún el nivel
+        if not game_over and not level_completed:
+            if now - start_show_time <= level_show_time:
                 for item in current_sequence:
                     idx = item["idx"]
                     color = item["color"]
@@ -605,7 +632,12 @@ with HandLandmarker.create_from_options(hand_options) as landmarker:
                     last_hit_time = now       # para rapidez del primer círculo
 
         # ===== fase de interacción =====
-        if not game_over and waiting_for_user and result.hand_landmarks:
+        if (
+            not game_over
+            and not level_completed
+            and waiting_for_user
+            and result.hand_landmarks
+        ):
             selection_done = False  # para cortar si alguna mano selecciona
 
             for hand_landmarks in result.hand_landmarks:
@@ -671,16 +703,19 @@ with HandLandmarker.create_from_options(hand_options) as landmarker:
                                 last_ui_score = total_score
                                 last_ui_combo = combo
 
+                                # Fin de nivel: marcamos pero NO cambiamos aún de nivel
                                 if current_step >= len(current_sequence):
                                     waiting_for_user = False
-                                    game_over = True
+                                    level_completed = True
+                                    level_completed_time = now
 
                             else:
                                 # ❌ fallo
                                 last_error = (cx, cy)
                                 last_error_time = now
 
-                                score_base -= 5
+                                # Penalización según nivel actual
+                                score_base -= level_penalty
                                 if score_base < 0:
                                     score_base = 0
                                 combo = 0
@@ -696,7 +731,35 @@ with HandLandmarker.create_from_options(hand_options) as landmarker:
                 if selection_done or game_over:
                     break
 
-        # dibujar aciertos permanentes
+        # ===== Transición entre niveles (o fin de partida) =====
+        if not game_over and level_completed:
+            # Mantenemos el último estado de los círculos dibujados durante LEVEL_TRANSITION_DELAY
+            if now - level_completed_time >= LEVEL_TRANSITION_DELAY:
+                if current_level_idx < len(LEVELS) - 1:
+                    # Pasamos al siguiente nivel
+                    current_level_idx += 1
+
+                    # Resetear estado de nivel
+                    sequence_generated = False
+                    current_sequence = []
+                    correct_hits = []
+                    disabled_indices = set()
+                    current_step = 0
+                    last_error = None
+                    last_error_time = 0
+                    sequence_start_time = None
+                    last_hit_time = None
+                    waiting_for_user = False
+
+                    level_completed = False
+                    level_completed_time = None
+                else:
+                    # Último nivel completado -> fin de juego
+                    game_over = True
+                    level_completed = False
+                    level_completed_time = None
+
+        # dibujar aciertos permanentes de este nivel
         for hit in correct_hits:
             idx = hit["idx"]
             color = hit["color"]
@@ -704,11 +767,11 @@ with HandLandmarker.create_from_options(hand_options) as landmarker:
             center = centers[idx]
             draw_fruit_count(frame, center, r, color, count)
 
-        # dibujar cruz temporal
+        # dibujar cruz temporal en el último error
         if last_error is not None and now - last_error_time < 2.0:
             draw_cross(frame, last_error, r)
 
-        # HUD
+        # HUD de score/combo
         if not game_over and (now - last_ui_event_time) < UI_SHOW_SECONDS:
             y0 = 80
             cv2.putText(
@@ -730,7 +793,7 @@ with HandLandmarker.create_from_options(hand_options) as landmarker:
                 2
             )
 
-        # ===== Pantalla final con rehabilitación =====
+        # ===== Pantalla final con rehabilitación (tras los 3 niveles) =====
         if game_over:
             total_score = score_base + score_time
 
@@ -786,7 +849,7 @@ with HandLandmarker.create_from_options(hand_options) as landmarker:
             title = f"Juego terminado - {username}"
             line1 = f"Score base (incluye combo): {score_base}"
             line2 = f"Puntos por rapidez: {score_time}"
-            line3 = f"Total partida: {total_score}"
+            line3 = f"Total partida (3 niveles): {total_score}"
             line4 = f"Mejor combo en esta sesion: {best_combo}"
             line5 = f"Sesiones registradas: {sesiones} | Mejor total historico: {int(best_hist_score)}"
             line6 = evo_text

@@ -148,6 +148,7 @@ def auth_menu(cap):
             mouse_state["y"] = y
             mouse_state["clicked"] = True
 
+    # Callback inicial del menú
     cv2.setMouseCallback("Juego serio", mouse_cb)
 
     while True:
@@ -156,6 +157,10 @@ def auth_menu(cap):
             cap.release()
             cv2.destroyAllWindows()
             sys.exit(0)
+
+        # IMPORTANTE: al volver de login/registro, el callback puede haber cambiado.
+        # Lo reinstalamos aquí en cada iteración del menú.
+        cv2.setMouseCallback("Juego serio", mouse_cb)
 
         frame = cv2.flip(frame, 1)
         h, w = frame.shape[:2]
@@ -190,12 +195,20 @@ def auth_menu(cap):
             cap.release()
             cv2.destroyAllWindows()
             sys.exit(0)
+
         elif key == ord('1'):
             u, p = register_user(cap)
+            # Al volver, reiniciamos el estado del ratón y el callback
+            mouse_state = {"x": None, "y": None, "clicked": False}
+            cv2.setMouseCallback("Juego serio", mouse_cb)
             if u is not None:
                 return u, p
+
         elif key == ord('2'):
             u, p = login_user(cap)
+            # Al volver, reiniciamos el estado del ratón y el callback
+            mouse_state = {"x": None, "y": None, "clicked": False}
+            cv2.setMouseCallback("Juego serio", mouse_cb)
             if u is not None:
                 return u, p
 
@@ -209,14 +222,20 @@ def auth_menu(cap):
                 if x1 <= mx <= x2 and y1 <= my <= y2:
                     if name == "register":
                         u, p = register_user(cap)
+                        # Al volver, reiniciamos estado y callback
+                        mouse_state = {"x": None, "y": None, "clicked": False}
+                        cv2.setMouseCallback("Juego serio", mouse_cb)
                         if u is not None:
                             return u, p
+
                     elif name == "login":
                         u, p = login_user(cap)
+                        # Al volver, reiniciamos estado y callback
+                        mouse_state = {"x": None, "y": None, "clicked": False}
+                        cv2.setMouseCallback("Juego serio", mouse_cb)
                         if u is not None:
                             return u, p
                     break
-
 
 def register_user(cap):
     ensure_users_file()
@@ -343,7 +362,6 @@ def register_user(cap):
                     elif name == "pass_field":
                         entering_password = True
                     break
-
 
 def login_user(cap):
     ensure_users_file()
